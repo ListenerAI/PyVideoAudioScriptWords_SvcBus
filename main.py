@@ -6,15 +6,9 @@ import logging
 from datetime import datetime
 
 from azure.servicebus.aio import ServiceBusClient
-from ai_speech_transcription_processor_stablev1 import (
-    extract_audio,
-    split_audio,
-    process_audio_chunks,
-    clean_related_files,
-    AUDIO_TRANSCRIPTIONS_PATH,
-    AUDIO_OUTPUT_PATH
-)
 from Authentication_BlobStorageClient import BlobStorageClient
+from script import process_all_video_chunks
+from combine_script import combine_transcript_jsons  # ✅ Added
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -31,8 +25,8 @@ SERVICE_BUS_SUBSCRIPTION_NAME = os.getenv("SERVICE_BUS_SUBSCRIPTION_NAME")
 
 # Constants
 DATA_DIR = "data"
-OUTPUT_CONTAINER = "mediatestingdata"
-INPUT_CONTAINER = "computervision"
+INPUT_CONTAINER = os.getenv("INPUT_CONTAINER")
+OUTPUT_CONTAINER = os.getenv("OUTPUT_CONTAINER")
 os.makedirs(DATA_DIR, exist_ok=True)
 
 async def process_message(message):
@@ -48,50 +42,16 @@ async def process_message(message):
 
         storage = BlobStorageClient()
         if not await storage.download_blob(blob_filename, download_path):
-          logger.error(f"Blob not found in {INPUT_CONTAINER}: {blob_filename}")
-          return
-
-        clean_related_files(AUDIO_TRANSCRIPTIONS_PATH, download_path)
-
-        if not extract_audio(download_path, AUDIO_OUTPUT_PATH):
-            logger.error("Audio extraction failed.")
+            logger.error(f"Blob not found in {INPUT_CONTAINER}: {blob_filename}")
             return
 
-        chunks = split_audio(AUDIO_OUTPUT_PATH, AUDIO_TRANSCRIPTIONS_PATH)
-        if not chunks:
-            logger.error("Audio split failed.")
-            return
+        await process_all_video_chunks(download_path)
 
-        process_audio_chunks(chunks, base_name=os.path.splitext(blob_filename)[0])
+        # ✅ Combine all transcription files after chunk processing
+        await combine_transcript_jsons(f"{id_user}-{id_video}")
 
-        # Upload results
-        result_blob_name = f"{os.path.splitext(blob_filename)[0]}_transcription.json"
-        result_path = os.path.join(AUDIO_TRANSCRIPTIONS_PATH, f"{os.path.splitext(blob_filename)[0]}_combined_transcription.json")
-        log_blob_name = f"{os.path.splitext(blob_filename)[0]}_log.txt"
+        logger.info(f"✅ Finished processing: {blob_filename} in {(time.time() - start_time):.2f}s")
 
-        with open(result_path, "r", encoding="utf-8") as f:
-            transcription_data = json.load(f)
-
-        result_payload = {
-            "formatted_utc_time": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
-            "id_usuario": id_user,
-            "id_video": id_video,
-            "id_blob": result_blob_name,
-            "id_container": OUTPUT_CONTAINER,
-            "words_count": len(transcription_data),
-            "transcriptions": transcription_data,
-            "end_data": True
-        }
-
-        client = await storage.get_blob_service_client()
-        container = client.get_container_client(OUTPUT_CONTAINER)
-
-        await container.get_blob_client(result_blob_name).upload_blob(json.dumps(result_payload), overwrite=True)
-
-        log_content = f"Finished in {(time.time() - start_time):.2f}s"
-        await container.get_blob_client(log_blob_name).upload_blob(log_content, overwrite=True)
-
-        logger.info(f"Upload complete for {result_blob_name}")
 
     except Exception as e:
         logger.exception(f"Error processing message: {e}")
@@ -113,5 +73,5 @@ async def main():
                     await receiver.complete_message(msg)
 
 if __name__ == "__main__":
-    logger.info("Starting AI Speech Transcription Service...")
+    logger.info("Starting AI Video Transcription Service...")
     asyncio.run(main())

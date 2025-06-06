@@ -33,6 +33,22 @@ class BlobStorageClient:
         if self.blob_service_client:
             await self.blob_service_client.close()
 
+    async def upload_blob(self, container_name, blob_name, file_path_or_bytes, overwrite=True):
+        client = await self.get_blob_service_client()
+        container_client = client.get_container_client(container_name)
+        blob_client = container_client.get_blob_client(blob_name)
+
+        if isinstance(file_path_or_bytes, (bytes, bytearray)):
+            data = file_path_or_bytes
+        elif isinstance(file_path_or_bytes, str) and os.path.exists(file_path_or_bytes):
+            with open(file_path_or_bytes, "rb") as f:
+                data = f.read()
+        else:
+            raise ValueError("❌ Invalid input to upload_blob: must be file path or bytes")
+
+        await blob_client.upload_blob(data, overwrite=overwrite)
+
+
     async def download_blob(self, search_pattern, download_file_path):
         """
         Downloads a blob matching exact filename (excluding extension).
