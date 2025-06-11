@@ -14,7 +14,8 @@ load_dotenv("app.env")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 # Constants from ENV
-FFMPEG_PATH = r"C:\ffmpeg\bin\ffmpeg.exe"
+#FFMPEG_PATH = r"C:\ffmpeg\bin\ffmpeg.exe"
+FFMPEG_PATH = "ffmpeg"
 CHUNK_DURATION = 30
 COGNITIVE_API_KEY = os.getenv("SUBSCRIPTION_COGNITIVE_SPEACH_TEXT_KEY")
 COGNITIVE_ENDPOINT = os.getenv("ENDPOINT_COGNITIVE_SPEACH_TEXT")
