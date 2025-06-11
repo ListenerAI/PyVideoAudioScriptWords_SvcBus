@@ -333,7 +333,7 @@ async def process_all_video_chunks(video_source_path):
 
         word_timings = convert_word_timings_to_seconds(response_data, base_name)
 
-        json_blob_name = f"{base_name}_transcription.json"
+        json_blob_name = f"{base_name}-audioTextResult.json"
         await storage.upload_blob(
             container_name=OUTPUT_CONTAINER,
             blob_name=json_blob_name,

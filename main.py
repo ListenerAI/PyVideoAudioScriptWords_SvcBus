@@ -48,10 +48,10 @@ async def process_message(message):
         await process_all_video_chunks(download_path)
 
         # ✅ Combine all transcription files after chunk processing
-        await combine_transcript_jsons(f"{id_user}-{id_video}")
+        base_video_id = os.path.splitext(os.path.basename(clip_filename))[0].split("-clip")[0]
+        await combine_transcript_jsons(base_video_id)
 
         logger.info(f"✅ Finished processing: {blob_filename} in {(time.time() - start_time):.2f}s")
-
 
     except Exception as e:
         logger.exception(f"Error processing message: {e}")
