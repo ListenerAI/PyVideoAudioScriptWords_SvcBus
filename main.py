@@ -36,14 +36,26 @@ async def process_message(message):
         id_user = payload["id_user"]
         id_video = payload["id_video"]
         clip_filename = payload.get("clip_filename", id_video)
+        is_wav = clip_filename.endswith(".wav")
+        input_container = os.getenv("INPUT_CONTAINER_VOCALS") if is_wav else os.getenv("INPUT_CONTAINER")
 
-        blob_filename = clip_filename if clip_filename.endswith(".mp4") else f"{clip_filename}.mp4"
+
+
+        #blob_filename = clip_filename if clip_filename.endswith(".mp4") else f"{clip_filename}.mp4"
+        if clip_filename.endswith(".wav") or clip_filename.endswith(".mp4"):
+            blob_filename = clip_filename
+        else:
+            blob_filename = f"{clip_filename}.mp4"
+
         download_path = os.path.join(DATA_DIR, blob_filename)
 
         storage = BlobStorageClient()
+        storage.container_name = input_container  # Set correct container before download
+
         if not await storage.download_blob(blob_filename, download_path):
-            logger.error(f"Blob not found in {INPUT_CONTAINER}: {blob_filename}")
+            logger.error(f"Blob not found in {input_container}: {blob_filename}")
             return
+
 
         await process_all_video_chunks(download_path)
 
@@ -58,19 +70,40 @@ async def process_message(message):
 
 async def main():
     async with ServiceBusClient.from_connection_string(SERVICE_BUS_CONNECTION_STR) as client:
-        receiver = client.get_subscription_receiver(
-            topic_name=SERVICE_BUS_TOPIC_NAME,
-            subscription_name=SERVICE_BUS_SUBSCRIPTION_NAME
-        )
-        async with receiver:
+        receivers = [
+            client.get_subscription_receiver(
+                topic_name=os.getenv("SERVICE_BUS_TOPIC_NAME"),
+                subscription_name=os.getenv("SERVICE_BUS_SUBSCRIPTION_NAME"),
+                max_auto_lock_renewal_duration=900
+            ),
+            client.get_subscription_receiver(
+                topic_name=os.getenv("INBOUND_VOCALS_SERVICE_BUS_TOPIC"),
+                subscription_name=os.getenv("INBOUND_VOCALS_SERVICE_BUS_SUBSCRIPTION"),
+                max_auto_lock_renewal_duration=900
+            )
+        ]
+
+        async with receivers[0], receivers[1]:
             while True:
-                messages = await receiver.receive_messages(max_message_count=1, max_wait_time=30)
-                if not messages:
-                    await asyncio.sleep(5)
-                    continue
-                for msg in messages:
-                    await process_message(msg)
-                    await receiver.complete_message(msg)
+                for receiver in receivers:
+                    try:
+                        messages = await receiver.receive_messages(max_message_count=1, max_wait_time=5)
+                        if messages:
+                            for msg in messages:
+                                logger.info(f"📥 Received message ID: {msg.message_id}")
+                                await process_message(msg)
+                                try:
+                                    logger.info(f"📝 Attempting to complete message ID: {msg.message_id}")
+                                    await receiver.complete_message(msg)
+                                    logger.info(f"✅ Message completed and removed from queue: {msg.message_id}")
+                                except Exception as e:
+                                    logger.error(f"❌ Failed to complete message ID: {msg.message_id} — {e}")
+                        else:
+                            logger.info("😴 No message received. Waiting...")
+                    except Exception as e:
+                        logger.exception(f"🔁 Receiver loop error: {e}")
+                await asyncio.sleep(1)
+
 
 if __name__ == "__main__":
     logger.info("Starting AI Video Transcription Service...")
