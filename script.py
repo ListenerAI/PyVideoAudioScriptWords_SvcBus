@@ -351,7 +351,7 @@ async def process_all_video_chunks(video_source_path):
 
     if duration is not None and duration <= 60:
         # ✅ Skip chunking, process directly
-        audio_path = f"{input_file_name}.wav"
+        audio_path = os.path.join("data", f"{input_file_name}.wav")
         logging.info(f"🎧 Audio ≤60s, direct process: {input_file_name}")
 
         if not extract_audio(video_source_path, audio_path):
