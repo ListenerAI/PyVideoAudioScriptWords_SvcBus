@@ -1,23 +1,16 @@
-FROM python:3.11-slim
+FROM python:3.10-slim
 
-# Establecer una carpeta de trabajo en el contenedor
 WORKDIR /app
 
-# Actualizar pip y las herramientas del sistema
-RUN pip install --upgrade pip && \
-    apt-get update && \
-    apt-get install -y \
+# ✅ Install system dependencies needed for ffmpeg and video/audio processing
+RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
-    libportaudio2 \
-    libportaudiocpp0 \
-    portaudio19-dev \
     libglib2.0-0 \
     libgl1-mesa-glx \
     libssl-dev \
     build-essential \
     libasound2 \
     wget \
-    libsndfile1 \
     ffmpeg \
     libavcodec-dev \
     libavformat-dev \
@@ -25,31 +18,23 @@ RUN pip install --upgrade pip && \
     libavutil-dev \
     libswscale-dev \
     libx264-dev \
-    libffi-dev && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Copiar el archivo de requerimientos al contenedor
+# ✅ Install Python dependencies
 COPY requirements.txt .
+RUN pip install --no-cache-dir --default-timeout=120 -r requirements.txt
 
-# Instalar las dependencias de Python restantes
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Copiar el resto de archivos de la aplicación al contenedor
+# ✅ Copy application code
 COPY . .
 
-# Asegúrate de que el directorio /data exista y cambia los permisos
-RUN mkdir -p /data && \
-    chmod -R 777 /data
+# ✅ Create data directory
+RUN mkdir -p /data && chmod -R 777 /data
 
-# Variables de entorno
-# ENV SPEECH_KEY=149a326359244a2faa89acf4ad0d4396
-# ENV SPEECH_REGION=eastus
-
-# Exponer el puerto que utiliza tu aplicación
+# ✅ Expose (optional, if using Flask endpoints)
 EXPOSE 8000
 
-# Comando para iniciar la aplicación
+# ✅ Command to run the Service Bus processing loop
 CMD ["python", "main.py"]
 
+# ✅ Freeze installed packages for inspection/debugging
 RUN pip freeze > /requirements_installed.txt

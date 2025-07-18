@@ -24,10 +24,6 @@ OUTPUT_CONTAINER = os.getenv("OUTPUT_CONTAINER")
 CHUNK_OUTPUT_DIR = os.getcwd()
 
 def extract_audio(video_path, audio_path):
-    if video_path.endswith(".wav"):
-        logging.info(f"🎧 Already WAV: {video_path}, skipping extraction and reusing file directly.")
-        # ✅ No need to copy; use original file
-        return True
     try:
         command = [
             FFMPEG_PATH, "-y", "-i", video_path,
@@ -38,8 +34,6 @@ def extract_audio(video_path, audio_path):
     except Exception as e:
         logging.error(f"❌ Audio extraction failed for {video_path}: {e}")
         return False
-
-
 
 def audio_to_text_cognitive_services(audio_file_path):
     import base64
@@ -309,78 +303,27 @@ def convert_word_timings_to_seconds(response_data, chunk_name):
     return words
 
 def split_video_into_chunks(video_source_path):
-    logging.info("🎬 Splitting into 30s chunks...")
+    logging.info("🎬 Splitting video into 30s chunks...")
     base_name = os.path.splitext(os.path.basename(video_source_path))[0]
-
-    # 🟣 Detect if it's audio or video
-    if video_source_path.endswith(".wav"):
-        output_template = os.path.join(CHUNK_OUTPUT_DIR, f"{base_name}-clip-%03d.wav")
-        command = [
-            FFMPEG_PATH, "-i", video_source_path,
-            "-f", "segment", "-segment_time", str(CHUNK_DURATION),
-            "-c", "copy", output_template
-        ]
-    else:
-        output_template = os.path.join(CHUNK_OUTPUT_DIR, f"{base_name}-clip-%03d.mp4")
-        command = [
-            FFMPEG_PATH, "-i", video_source_path,
-            "-c", "copy", "-map", "0",
-            "-f", "segment", "-segment_time", str(CHUNK_DURATION),
-            output_template
-        ]
-
+    output_template = os.path.join(CHUNK_OUTPUT_DIR, f"{base_name}-clip-%03d.mp4")
+    command = [
+        FFMPEG_PATH, "-i", video_source_path,
+        "-c", "copy", "-map", "0",
+        "-f", "segment", "-segment_time", str(CHUNK_DURATION),
+        output_template
+    ]
     subprocess.run(command, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    return sorted(glob(os.path.join(CHUNK_OUTPUT_DIR, f"{base_name}-clip-*")))
-
-
-import wave
-
-def get_audio_duration_seconds(file_path):
-    if file_path.endswith(".wav"):
-        with wave.open(file_path, 'r') as wav_file:
-            frames = wav_file.getnframes()
-            rate = wav_file.getframerate()
-            duration = frames / float(rate)
-            return duration
-    return None
+    return sorted(glob(os.path.join(CHUNK_OUTPUT_DIR, f"{base_name}-clip-*.mp4")))
 
 async def process_all_video_chunks(video_source_path):
     storage = BlobStorageClient()
-    input_file_name = os.path.splitext(os.path.basename(video_source_path))[0]
-    duration = get_audio_duration_seconds(video_source_path) if video_source_path.endswith(".wav") else None
-
-    if duration is not None and duration <= 60:
-        # ✅ Skip chunking, process directly
-        audio_path = f"{input_file_name}.wav"
-        logging.info(f"🎧 Audio ≤60s, direct process: {input_file_name}")
-
-        if not extract_audio(video_source_path, audio_path):
-            return
-
-        response_data = audio_to_text_cognitive_services(audio_path)
-        if not response_data:
-            return
-
-        word_timings = convert_word_timings_to_seconds(response_data, input_file_name)
-        json_blob_name = f"{input_file_name}-audioTextResult.json"
-        await storage.upload_blob(
-            container_name=OUTPUT_CONTAINER,
-            blob_name=json_blob_name,
-            file_path_or_bytes=json.dumps(word_timings, indent=2).encode("utf-8")
-        )
-
-        if os.path.exists(audio_path):
-            os.remove(audio_path)
-            logging.info(f"🧹 Deleted: {audio_path}")
-        logging.info(f"✅ Uploaded: {json_blob_name}")
-        return
-
-    # ✅ >60s = chunking
     chunk_paths = split_video_into_chunks(video_source_path)
+
     for chunk_path in chunk_paths:
-        chunk_file_name = os.path.splitext(os.path.basename(chunk_path))[0]
-        audio_path = os.path.join(CHUNK_OUTPUT_DIR, f"{chunk_file_name}.wav")
-        logging.info(f"🎧 Processing {chunk_file_name}...")
+        base_name = os.path.splitext(os.path.basename(chunk_path))[0]
+        audio_path = os.path.join(CHUNK_OUTPUT_DIR, f"{base_name}.wav")
+
+        logging.info(f"🎧 Processing {base_name}...")
 
         if not extract_audio(chunk_path, audio_path):
             continue
@@ -389,23 +332,17 @@ async def process_all_video_chunks(video_source_path):
         if not response_data:
             continue
 
-        word_timings = convert_word_timings_to_seconds(response_data, chunk_file_name)
-        json_blob_name = f"{chunk_file_name}-audioTextResult.json"
+        word_timings = convert_word_timings_to_seconds(response_data, base_name)
+
+        json_blob_name = f"{base_name}-audioTextResult.json"
         await storage.upload_blob(
             container_name=OUTPUT_CONTAINER,
             blob_name=json_blob_name,
             file_path_or_bytes=json.dumps(word_timings, indent=2).encode("utf-8")
         )
 
-        if os.path.exists(chunk_path):
-            os.remove(chunk_path)
-            logging.info(f"🧹 Deleted chunk: {chunk_path}")
-        if audio_path != chunk_path and os.path.exists(audio_path):
-            os.remove(audio_path)
-            logging.info(f"🧹 Deleted audio: {audio_path}")
+        os.remove(chunk_path)
+        os.remove(audio_path)
+        logging.info(f"🧹 Deleted: {chunk_path}, {audio_path}")
 
-        logging.info(f"✅ Uploaded: {json_blob_name}")
-
-    logging.info(f"✅ All chunks for {input_file_name} processed and uploaded.")
-
-
+    logging.info("✅ All chunks processed and uploaded.")
